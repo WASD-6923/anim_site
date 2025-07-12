@@ -6,17 +6,16 @@ from fastapi import APIRouter, HTTPException, Depends, status, Body
 from pydantic import BaseModel
 from typing import Optional, Annotated
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from models import Token, TokenData, User
-from src.database.db import UserDB, get_db
+from ..models import Token, TokenData, User
+from ..database.db import get_db, UserDB
 from sqlalchemy.orm import sessionmaker, Session, DeclarativeBase
 from jose import JWTError
+from ..config import ALGORITHM, SECRET_KEY
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 # Конфигурация
-SECRET_KEY = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
-ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # Фиктивная база данных
@@ -61,20 +60,17 @@ def authenticate_user(db: Session, username: str, password: str) -> Optional[Use
     
     return user
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict):
     to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        expire = datetime.now(timezone.utc) + timedelta(minutes=15)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    to_encode.update({"exp": datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
 # Зависимости
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
-    db: Session = Depends(get_db)  # Убрали лишнюю скобку
-) -> User:  # Pydantic модель
+    db: Session = Depends(get_db)
+) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -95,17 +91,18 @@ async def get_current_user(
     
     # Преобразуем в Pydantic модель
     return User(
-    id=user_db.id,
-    username=user_db.username,
-    hashed_password=user_db.hashed_password,
-    disabled=user_db.disabled  
+        id=user_db.id,
+        username=user_db.username,
+        email=user_db.email,
+        hashed_password=user_db.hashed_password,
+        disabled=user_db.disabled
     )
 
 # Для get_current_active_user
 async def get_current_active_user(
-    current_user: Annotated[User, Depends(get_current_user)]  # Исправили Annotated
+    current_user: Annotated[User, Depends(get_current_user)]
 ) -> User:
-    if current_user.disabled:  # Проверяем поле disabled
+    if current_user.disabled:
         raise HTTPException(status_code=400, detail="Inactive user")
     return current_user
 
@@ -124,9 +121,8 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = create_access_token(
-        data={"sub": user.username}, expires_delta=access_token_expires
+        data={"sub": user.username}
     )
     
     return Token(access_token=access_token, token_type="bearer")
