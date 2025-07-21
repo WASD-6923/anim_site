@@ -141,8 +141,9 @@ async def read_own_items(
 
 @router.post("/api/users")
 def create_user(data  = Body(), db: Session = Depends(get_db)):
-    user_log = UserDB(name=data["username"], password=data["hashed_password"])
-    db.add(user_log)
+    user_log = UserDB(name=data["username"])
+    user_pass = UserDB(password=data["hashed_password"])
+    db.add(user_log,user_pass)
     db.commit()
-    db.refresh(user_log)
-    return user_log
+    db.refresh(user_log,user_pass)
+    return user_log,user_pass
